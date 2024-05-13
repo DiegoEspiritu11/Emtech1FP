@@ -1,0 +1,175 @@
+import tkinter as tk
+import customtkinter
+import cv2
+import numpy as np
+import PIL.Image, PIL.ImageTk
+import easyocr
+from tkinter import messagebox
+import pyttsx3
+
+
+customtkinter.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
+customtkinter.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue")
+
+class App(customtkinter.CTk):
+   def __init__(self):
+       super().__init__()
+       self.engine = pyttsx3.init()
+       self.engine.setProperty('rate', 150)  
+
+
+       # configure window
+       self.title("Eyespeak")
+       self.geometry("1100x580")
+
+
+       # configure grid layout (4x4)
+       self.grid_columnconfigure(1, weight=1)
+       self.grid_columnconfigure((2, 3), weight=0)
+       self.grid_rowconfigure((0, 1, 2), weight=1)
+
+
+       # create sidebar frame with widgets
+       self.sidebar_frame = customtkinter.CTkFrame(self, width=140, corner_radius=0)
+       self.sidebar_frame.grid(row=0, column=0, rowspan=5, sticky="nsew")
+       self.sidebar_frame.grid_rowconfigure(5, weight=1)
+       self.logo_label = customtkinter.CTkLabel(self.sidebar_frame, text="Eyespeak",
+                                                 font=customtkinter.CTkFont(size=20, weight="bold"))
+       self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+       self.capture_button = customtkinter.CTkButton(self.sidebar_frame, text="Capture", command=self.capture_image)
+       self.capture_button.grid(row=1, column=0, padx=20, pady=10)
+       self.speak_button = customtkinter.CTkButton(self.sidebar_frame, text="Speak", command=self.detect_text)
+       self.speak_button.grid(row=2, column=0, padx=20, pady=10)
+       self.capture_again_button = customtkinter.CTkButton(self.sidebar_frame, text="Capture Again",
+                                                            command=self.capture_again)
+       self.capture_again_button.grid(row=3, column=0, padx=20, pady=10)
+
+
+       # create appearance settings
+       self.appearance_mode_label = customtkinter.CTkLabel(self.sidebar_frame, text="Appearance Mode:", anchor="w")
+       self.appearance_mode_label.grid(row=4, column=0, padx=20, pady=(10, 5))  # Adjusted padding
+       self.appearance_mode_optionemenu = customtkinter.CTkOptionMenu(self.sidebar_frame,
+                                                                      values=["Light", "Dark", "System"],
+                                                                      command=self.change_appearance_mode_event)
+       self.appearance_mode_optionemenu.grid(row=5, column=0, padx=20, pady=(5, 10))  # Adjusted padding
+       self.scaling_label = customtkinter.CTkLabel(self.sidebar_frame, text="UI Scaling:", anchor="w")
+       self.scaling_label.grid(row=6, column=0, padx=20, pady=(10, 0))
+       self.scaling_optionemenu = customtkinter.CTkOptionMenu(self.sidebar_frame,
+                                                              values=["80%", "90%", "100%", "110%", "120%"],
+                                                              command=self.change_scaling_event)
+       self.scaling_optionemenu.grid(row=7, column=0, padx=20, pady=(0, 20))
+
+
+       # Initialize EasyOCR
+       self.reader = easyocr.Reader(['en'])
+
+
+       # Initialize camera feed
+       self.video_source = 0
+       self.vid = cv2.VideoCapture(self.video_source)
+
+
+       # Indicator for capturing image
+       self.capturing = False
+
+
+       # File path to save captured image
+       self.image_path = "captured_image.jpg"
+
+
+       # Create label to display captured image
+       self.image_label = tk.Label(self)
+       self.image_label.grid(row=0, column=1, rowspan=3, padx=20, pady=20)
+
+
+       # Update live feed
+       self.update_live_feed()
+
+
+   def update_live_feed(self):
+       ret, frame = self.vid.read()
+       if ret:
+           frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+           frame = PIL.Image.fromarray(frame)
+           frame = PIL.ImageTk.PhotoImage(image=frame)
+           self.image_label.config(image=frame)
+           self.image_label.image = frame
+       self.after(10, self.update_live_feed)  # Update every 10 milliseconds
+
+
+   def capture_image(self):
+       if not self.capturing:
+           self.capturing = True
+           ret, frame = self.vid.read()
+           if ret:
+               cv2.imwrite(self.image_path, cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+               messagebox.showinfo("Capture", "Image captured and saved successfully!")
+
+
+   def capture_again(self):
+       if self.capturing:
+           self.capturing = False
+           self.vid.release()
+           self.image_label.grid_forget()
+           self.image_label = tk.Label(self)
+           self.image_label.grid(row=0, column=1, rowspan=3, padx=20, pady=20)
+           self.vid = cv2.VideoCapture(self.video_source)
+           self.update_live_feed()
+
+
+   def detect_text(self):
+       if self.capturing:
+           # Load the captured image
+           captured_image = cv2.imread(self.image_path)
+
+
+           # Detect text using EasyOCR
+           result = self.reader.readtext(captured_image)
+
+
+           # Convert detected text to speech
+           text_to_speak = ""
+           for detection in result:
+               text_to_speak += detection[1] + " "
+
+
+           # Speak the detected text
+           self.engine.say(text_to_speak)
+           self.engine.runAndWait()
+
+
+           # Draw bounding boxes and text on the image
+           img = captured_image.copy()
+           font = cv2.FONT_HERSHEY_SIMPLEX
+           spacer = 100
+           for detection in result:
+               bbox = detection[0]
+               top_left = (int(bbox[0][0]), int(bbox[0][1]))
+               bottom_right = (int(bbox[2][0]), int(bbox[2][1]))
+               text = detection[1]
+               img = cv2.rectangle(img, top_left, bottom_right, (0, 255, 0), 3)
+               img = cv2.putText(img, text, (20, spacer), font, 0.5, (0, 255, 0), 2, cv2.LINE_AA)
+               spacer += 15
+
+
+           # Display the image with detected text in a new window
+           cv2.imshow("Detected Text", img)
+           cv2.waitKey(0)
+           cv2.destroyAllWindows()
+
+
+   def change_appearance_mode_event(self, new_appearance_mode: str):
+       customtkinter.set_appearance_mode(new_appearance_mode)
+
+
+   def change_scaling_event(self, new_scaling: str):
+       new_scaling_float = int(new_scaling.replace("%", "")) / 100
+       customtkinter.set_widget_scaling(new_scaling_float)
+
+
+
+
+if __name__ == "__main__":
+   app = App()
+   app.mainloop()
+
